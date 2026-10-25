@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ShopEasy</title>
+<style>
+:root{--bg:#f6f7fb;--c:#fff;--t:#1a1d29;--m:#6b7280;--a:#4f46e5;--b:#e5e7eb}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1117;--c:#181b24;--t:#eef0f6;--m:#9aa1b2;--b:#2a2f3c}}
+*{box-sizing:border-box}
+body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 20px;background:var(--c);border-bottom:1px solid var(--b);position:sticky;top:0}
+nav b{margin-right:auto;font-size:18px}
+button,input,select,textarea{font:inherit;color:inherit;background:var(--c);border:1px solid var(--b);border-radius:8px;padding:8px 12px}
+button{cursor:pointer}button.p{background:var(--a);color:#fff;border-color:var(--a)}button.d{color:#dc2626}button:disabled{opacity:.5;cursor:not-allowed}
+main{max-width:1000px;margin:20px auto;padding:0 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+.card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.card img{width:100%;height:140px;object-fit:cover;border-radius:8px;background:var(--b)}
+.m{color:var(--m);font-size:13px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}
+form.card{max-width:380px}table{width:100%;border-collapse:collapse}td{padding:8px;border-bottom:1px solid var(--b)}
+</style></head><body>
+<nav><b>🛒 ShopEasy</b>
+<button onclick="go('shop')">Shop</button>
+<button onclick="go('cart')">Cart (<span id="cc">0</span>)</button>
+<button onclick="go('orders')" id="no" hidden>My Orders</button>
+<button onclick="go('admin')" id="na" hidden>Admin</button>
+<button onclick="go('login')" id="nl">Login</button></nav>
+<main id="v"></main>
+<script>
+const $=s=>document.querySelector(s);
+let S=JSON.parse(localStorage.s||'{}'),cart=JSON.parse(localStorage.cart||'[]'),P=[],reg=false;
+const save=()=>{localStorage.s=JSON.stringify(S);localStorage.cart=JSON.stringify(cart)};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+const run=f=>async(...a)=>{try{await f(...a)}catch(e){alert(e.message)}};
+async function api(u,m='GET',b){
+  const r=await fetch('/api'+u,{method:m,headers:{'Content-Type':'application/json',...(S.token&&{Authorization:'Bearer '+S.token})},body:b&&JSON.stringify(b)});
+  const d=await r.json();if(!r.ok)throw new Error(d.error);return d}
+function nav(){cc.textContent=cart.reduce((n,i)=>n+i.qty,0);no.hidden=!S.token;na.hidden=S.user?.role!=='admin';nl.textContent=S.token?'Logout ('+S.user.name+')':'Login'}
+async function go(v){
+  if(v==='login'&&S.token){S={};save();return go('shop')}
+  nav();try{await views[v]()}catch(e){alert(e.message);if(/log in/i.test(e.message)){S={};save();go('login')}}}
+
+const views={
+async shop(q=''){
+  P=await api('/products?q='+encodeURIComponent(q));
+  $('#v').innerHTML=`<div class=row><input id=q placeholder="Search products" value="${esc(q)}"><button onclick="views.shop($('#q').value)">Search</button></div>
+  <div class=grid>${P.map(p=>`<div class=card><img src="${esc(p.image)}" alt=""><b>${esc(p.name)}</b><span class=m>${esc(p.description)}</span>
+  <div class=row><b>₹${p.price}</b><span class=m>${p.stock?p.stock+' left':'Out of stock'}</span></div>
+  <button class=p ${p.stock?'':'disabled'} onclick="add('${p._id}')">Add to cart</button></div>`).join('')||'<p>No products found.</p>'}</div>`},
+cart(){
+  const t=cart.reduce((s,i)=>s+i.price*i.qty,0);
+  $('#v').innerHTML=cart.length?`<table>${cart.map((i,n)=>`<tr><td>${esc(i.name)}</td><td>₹${i.price}</td>
+  <td><input type=number min=1 value=${i.qty} style="width:70px" onchange="setQty(${n},this.value)"></td>
+  <td><button class=d onclick="setQty(${n},0)">✕</button></td></tr>`).join('')}</table>
+  <h3>Total: ₹${t}</h3><textarea id=ad placeholder="Delivery address" rows=3 style="width:100%"></textarea>
+  <p><button class=p onclick="checkout()">Place order</button></p>`:'<p>Your cart is empty.</p>'},
+async orders(){
+  const o=await api('/orders/mine');
+  $('#v').innerHTML='<h2>My orders</h2>'+(o.map(x=>`<div class=card style="margin-bottom:10px"><div class=row><b>#${x._id.slice(-6)}</b>
+  <span class=m>${new Date(x.createdAt).toLocaleDateString()}</span><b style="margin-left:auto">${x.status}</b></div>
+  ${x.items.map(i=>`<span>${esc(i.name)} × ${i.qty}</span>`).join('')}<b>₹${x.total}</b></div>`).join('')||'<p>No orders yet.</p>')},
+async admin(){
+  const[p,o]=await Promise.all([api('/products'),api('/orders')]);
+  $('#v').innerHTML=`<h2>Add product</h2><form class=card onsubmit="addP(event)">
+  ${['name','price','stock','image','category','description'].map(f=>`<input name=${f} placeholder=${f} ${f=='name'||f=='price'?'required':''}>`).join('')}<button class=p>Save</button></form>
+  <h2>Products</h2><table>${p.map(x=>`<tr><td>${esc(x.name)}</td><td>₹${x.price}</td><td>${x.stock} in stock</td>
+  <td><button class=d onclick="delP('${x._id}')">Delete</button></td></tr>`).join('')}</table>
+  <h2>Orders</h2><table>${o.map(x=>`<tr><td>#${x._id.slice(-6)}</td><td>${esc(x.user?.name)}</td><td>₹${x.total}</td>
+  <td><select onchange="setSt('${x._id}',this.value)">${['Placed','Shipped','Delivered','Cancelled'].map(s=>`<option ${s==x.status?'selected':''}>${s}</option>`).join('')}</select></td></tr>`).join('')}</table>`},
+login(){
+  reg=false;
+  $('#v').innerHTML=`<form class=card onsubmit="doAuth(event)"><h3 id=t>Login</h3><input name=name placeholder=Name hidden>
+  <input name=email type=email placeholder=Email required><input name=password type=password placeholder=Password required>
+  <button class=p>Continue</button><a href=# class=m onclick="tog();return false">Need an account? Register</a></form>`}
+};
+
+const add=id=>{const p=P.find(x=>x._id===id),i=cart.find(c=>c.product===id);
+  if(i){if(i.qty<p.stock)i.qty++}else cart.push({product:id,name:p.name,price:p.price,qty:1});save();nav()};
+const setQty=(n,v)=>{v=Math.floor(+v);if(v<1)cart.splice(n,1);else cart[n].qty=v;save();nav();views.cart()};
+const checkout=run(async()=>{
+  if(!S.token){alert('Please log in to check out');return go('login')}
+  await api('/orders','POST',{items:cart.map(({product,qty})=>({product,qty})),address:$('#ad').value});
+  cart=[];save();nav();alert('Order placed!');go('orders')});
+const tog=()=>{reg=!reg;$('[name=name]').hidden=!reg;t.textContent=reg?'Register':'Login'};
+const doAuth=run(async e=>{e.preventDefault();
+  S=await api(reg?'/register':'/login','POST',Object.fromEntries(new FormData(e.target)));save();go('shop')});
+const addP=run(async e=>{e.preventDefault();await api('/products','POST',Object.fromEntries(new FormData(e.target)));views.admin()});
+const delP=run(async id=>{if(confirm('Delete this product?')){await api('/products/'+id,'DELETE');views.admin()}});
+const setSt=run(async(id,s)=>{await api('/orders/'+id+'/status','PATCH',{status:s})});
+go('shop');
+</script></body></html>
